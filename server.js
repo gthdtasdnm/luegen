@@ -8,6 +8,9 @@
 import { darfRaumOeffnen, raumVermerkt } from "./bremse.js";
 import { cleanName, raumverwaltung, shuffle } from "./raum.js";
 import { starte } from "./statisch.js";
+// Blatt und Ansageleiter liegen in einer eigenen Datei, damit `probe.js`
+// dieselben Funktionen pruefen kann, die hier laufen.
+import { istGelogen, naechsterRang, neuesDeck, RAENGE } from "./blatt.js";
 
 const PORT = Number(Deno.env.get("PORT") ?? 8069);
 const HOST = Deno.env.get("HOST") ?? "0.0.0.0";
@@ -16,18 +19,7 @@ const PUBLIC = new URL("./public/", import.meta.url);
 const MAX_PLAYERS = 6;
 const MIN_PLAYERS = 3;
 
-// Die Leiter, auf der angesagt wird. Nach dem Ass geht es nicht weiter –
-// deshalb wird der Stapel dort weggeräumt statt herumgereicht.
-const RAENGE = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "B", "D", "K", "A"];
-const FARBEN = ["♠", "♥", "♦", "♣"];
-
 const AUFDECK_MS = 5000;
-
-function neuesDeck() {
-  const deck = [];
-  for (const r of RAENGE) for (const f of FARBEN) deck.push({ r, f });
-  return shuffle(deck);
-}
 
 const {
   rooms, browsing,
@@ -175,7 +167,7 @@ function aufdecken(room, zweiflerId) {
   if (!l) return;
   const leger = room.players.get(l.von);
   const zweifler = room.players.get(zweiflerId);
-  const gelogen = l.karten.some((k) => k.r !== l.rang);
+  const gelogen = istGelogen(l.karten, l.rang);
   const nehmerId = gelogen ? l.von : zweiflerId;
   const nehmer = room.players.get(nehmerId);
 
@@ -376,13 +368,18 @@ function handle(ws, msg) {
       room.stapel.push(...karten);
       room.letzte = { von: player.id, rang, karten };
 
-      if (rang === "A") {
-        // Ein Ass wird nicht weitergegeben: der Stapel bleibt liegen, aber
-        // der Nächste fängt eine neue Ansage an.
-        room.rang = null;
-      } else {
-        room.rang = RAENGE[RAENGE.indexOf(rang) + 1];
+      // Nach dem Ass bleibt der Stapel liegen, aber der Naechste faengt eine
+      // neue Ansage an.
+      room.rang = naechsterRang(rang);
+
+      // Sind alle bis auf einen durch, kann die Partie nicht weitergehen: der
+      // Letzte wuerde sich selbst weiterlegen und niemand koennte ihn stoppen.
+      // Ohne diese Zeile bliebe die Partie an dieser Stelle stehen.
+      if (room.reihe.length < 2) {
+        pruefeFertig(room, player.id);
+        return finishGame(room);
       }
+
       room.amZug = naechster(room, player.id);
       pushRunde(room);
       break;
