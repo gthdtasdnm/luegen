@@ -19,17 +19,40 @@ function wsUrl() {
   return u.href;
 }
 
+// Wartezeit bis zum naechsten Versuch: waechst mit jedem Fehlschlag, faellt
+// beim ersten Erfolg zurueck. Ein fester Takt von 1500 ms waeren genau 40
+// neue Verbindungen je Minute - und `bremse.js` laesst 40 je Minute und IP
+// zu. Wem der Dienst kurz wegbrach, der sperrte sich damit selbst aus. Der
+// Zufallsanteil verhindert, dass nach einem Neustart alle Clients in
+// derselben Millisekunde wiederkommen. Ebenso in `gemeinsam/schale.js`.
+const WARTE_ANFANG = 500;
+const WARTE_MAX = 8000;
+// Zurueckgesetzt wird erst nach drei Sekunden Bestand: ein `onopen` allein
+// reicht nicht, weil ein Dienst in der Absturzschleife die Verbindung annimmt
+// und sofort wieder abwirft. Ebenso in `gemeinsam/schale.js`.
+const BEWAEHRT_NACH = 3000;
+let warte = WARTE_ANFANG;
+let bewaehrung = null;
+
 function verbinde(dann) {
   if (S.ws && S.ws.readyState === WebSocket.OPEN) return dann?.();
   S.ws = new WebSocket(wsUrl());
-  S.ws.onopen = () => { $("status").textContent = ""; dann?.(); };
+  S.ws.onopen = () => {
+    clearTimeout(bewaehrung);
+    bewaehrung = setTimeout(() => { warte = WARTE_ANFANG; }, BEWAEHRT_NACH);
+    $("status").textContent = "";
+    dann?.();
+  };
   S.ws.onmessage = (ev) => empfange(JSON.parse(ev.data));
   S.ws.onclose = () => {
+    clearTimeout(bewaehrung);
     $("status").textContent = "Verbindung weg – neu verbinden …";
+    const gleich = warte * (0.8 + Math.random() * 0.4);
+    warte = Math.min(warte * 1.8, WARTE_MAX);
     setTimeout(() => verbinde(() => {
       if (S.code) schicke({ t: "join", code: S.code, token: S.token, name: nameFeld() });
       else schicke({ t: "browse" });
-    }), 1500);
+    }), gleich);
   };
 }
 const schicke = (m) => S.ws?.readyState === WebSocket.OPEN && S.ws.send(JSON.stringify(m));
@@ -279,8 +302,8 @@ $("helpClose").onclick = () => { $("help").hidden = true; };
 // Start
 const gespeichert = JSON.parse(sessionStorage.getItem("luegen") ?? "null");
 const hash = location.hash.replace("#", "").toUpperCase();
-$("name").value = localStorage.getItem("spielername") ?? "";
-$("name").onchange = () => localStorage.setItem("spielername", nameFeld());
+$("name").value = localStorage.getItem("spiele_name") ?? "";
+$("name").onchange = () => localStorage.setItem("spiele_name", nameFeld());
 verbinde(() => {
   if (hash && gespeichert?.code === hash) {
     schicke({ t: "join", code: hash, token: gespeichert.token, name: nameFeld() });
