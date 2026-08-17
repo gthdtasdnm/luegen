@@ -72,13 +72,76 @@ function zeige(name) {
   }
 }
 
+// ------------------------------------------------------------------ Kennung
+// Gleiche Regel wie in `gemeinsam/schale.js`, hier von Hand – dieser Client
+// hat die Schale nicht.
+//
+// Bis zum 17.08.2026 lag die Kennung im `sessionStorage` und starb mit dem
+// Tab. Auf dem Handy schließt Safari Tabs von sich aus; wer zurückkam, war für
+// den Server ein neuer Spieler, während sein alter Platz mit dem Hostzeichen
+// stehenblieb – und niemand mehr starten konnte. Das war Bugreport 4.
+//
+// Jetzt `localStorage` plus Herzschlag: der Tab, dem die Kennung gehört,
+// frischt sie alle vier Sekunden auf. Ein zweiter Tab sieht den frischen
+// Herzschlag und lässt die Kennung liegen – sonst zögen sich die beiden
+// abwechselnd den Platz weg. Nach zwei Stunden verfällt der Eintrag.
+const SITZ_KEY = "luegen";
+const HERZ_MS = 4000;
+const HERZ_TOT = 12_000;
+const SITZ_VERFALL = 2 * 60 * 60 * 1000;
+const TAB = (() => {
+  try {
+    const t = sessionStorage.getItem("spiele_tab") ??
+      (crypto.randomUUID?.() ?? String(Date.now()) + String(Math.random()).slice(2));
+    sessionStorage.setItem("spiele_tab", t);
+    return t;
+  } catch {
+    return "tab";
+  }
+})();
+let herzUhr = null;
+
+function sitz() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SITZ_KEY) ?? "null");
+    if (!s || !s.code || !s.token) return null;
+    const alter = Date.now() - (s.herz ?? 0);
+    if (alter > SITZ_VERFALL) { localStorage.removeItem(SITZ_KEY); return null; }
+    if (s.tab !== TAB && alter < HERZ_TOT) return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+/** Token für genau diesen Raum – sonst nichts, damit kein fremder mitfährt. */
+const tokenFuer = (code) => (sitz()?.code === code ? sitz().token : undefined);
+
+function sitzHalten(code, token) {
+  try {
+    clearInterval(herzUhr);
+    const schreibe = () => localStorage.setItem(
+      SITZ_KEY,
+      JSON.stringify({ code, token, tab: TAB, herz: Date.now() }),
+    );
+    schreibe();
+    herzUhr = setInterval(schreibe, HERZ_MS);
+  } catch { /* Privatmodus – dann eben ohne Wiedereinstieg */ }
+}
+
+function sitzLoeschen() {
+  clearInterval(herzUhr);
+  herzUhr = null;
+  try { localStorage.removeItem(SITZ_KEY); } catch { /* egal */ }
+}
+
 // ---------------------------------------------------------------- Nachrichten
 function empfange(m) {
   switch (m.t) {
     case "rooms": zeichneRaeume(m.rooms); break;
     case "joined":
       S.me = m.you; S.token = m.token; S.code = m.code;
-      sessionStorage.setItem("luegen", JSON.stringify({ code: m.code, token: m.token }));
+      sitzHalten(m.code, m.token);
       history.replaceState(null, "", "#" + m.code);
       break;
     case "room": S.room = m; zeichneRaum(); break;
@@ -98,7 +161,8 @@ function zeichneRaeume(liste) {
     row.append(el("span", "roomrow-code", r.code));
     row.append(el("span", "roomrow-name", r.host));
     row.append(el("span", "roomrow-count", `${r.count}/${r.max}`));
-    row.onclick = () => schicke({ t: "join", code: r.code, name: nameFeld() });
+    row.onclick = () =>
+      schicke({ t: "join", code: r.code, token: tokenFuer(r.code), name: nameFeld() });
     box.append(row);
   }
 }
@@ -273,7 +337,9 @@ $("createBtn").onclick = () =>
   verbinde(() => schicke({ t: "create", name: nameFeld(), isPublic: S.isPublic }));
 $("joinBtn").onclick = () => {
   const code = $("codeInput").value.toUpperCase().trim();
-  if (code) verbinde(() => schicke({ t: "join", code, name: nameFeld() }));
+  if (code) {
+    verbinde(() => schicke({ t: "join", code, token: tokenFuer(code), name: nameFeld() }));
+  }
 };
 $("copyBtn").onclick = async () => {
   try {
@@ -288,19 +354,22 @@ $("readyBtn").onclick = () => {
 $("startBtn").onclick = () => schicke({ t: "start" });
 $("endeBtn").onclick = () => schicke({ t: "ende" });
 $("againBtn").onclick = () => schicke({ t: "again" });
-$("leaveBtn").onclick = () => {
+function verlassen() {
   schicke({ t: "leave" });
   S.code = null; S.room = null;
-  sessionStorage.removeItem("luegen");
+  sitzLoeschen();
   history.replaceState(null, "", location.pathname);
   zeige("home");
   schicke({ t: "browse" });
-};
+}
+$("leaveBtn").onclick = verlassen;
+// Derselbe Weg hinaus von überall: Lobby, Spielbildschirm, Endstand.
+for (const b of document.querySelectorAll("[data-raus]")) b.onclick = verlassen;
 $("helpBtn").onclick = () => { $("help").hidden = false; };
 $("helpClose").onclick = () => { $("help").hidden = true; };
 
 // Start
-const gespeichert = JSON.parse(sessionStorage.getItem("luegen") ?? "null");
+const gespeichert = sitz();
 const hash = location.hash.replace("#", "").toUpperCase();
 $("name").value = localStorage.getItem("spiele_name") ?? "";
 $("name").onchange = () => localStorage.setItem("spiele_name", nameFeld());
