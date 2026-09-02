@@ -1,4 +1,11 @@
 // LÜGEN – Client. Der Server hält die Wahrheit; hier wird nur gezeichnet.
+
+import { starteSprache, t, uebersetze } from "./sprache.js";
+import { WOERTER } from "./texte.js";
+
+// Vor allem, was zeichnet: der Warteraum soll gleich in der richtigen
+// Sprache dastehen. Deutsch steht im HTML und in den Aufrufen hier.
+starteSprache(WOERTER);
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -46,7 +53,7 @@ function verbinde(dann) {
   S.ws.onmessage = (ev) => empfange(JSON.parse(ev.data));
   S.ws.onclose = () => {
     clearTimeout(bewaehrung);
-    $("status").textContent = "Verbindung weg – neu verbinden …";
+    $("status").textContent = t("schale.weg", {}, "Verbindung weg – neu verbinden …");
     const gleich = warte * (0.8 + Math.random() * 0.4);
     warte = Math.min(warte * 1.8, WARTE_MAX);
     setTimeout(() => verbinde(() => {
@@ -57,7 +64,7 @@ function verbinde(dann) {
 }
 const schicke = (m) => S.ws?.readyState === WebSocket.OPEN && S.ws.send(JSON.stringify(m));
 
-const nameFeld = () => $("name").value.trim() || "Spieler";
+const nameFeld = () => $("name").value.trim() || t("schale.spieler", {}, "Spieler");
 
 function toast(text) {
   const t = $("toast");
@@ -155,7 +162,7 @@ function zeichneRaeume(liste) {
   const box = $("roomList");
   box.innerHTML = "";
   $("roomsCount").textContent = liste.length ? `(${liste.length})` : "";
-  if (!liste.length) return box.append(el("div", "rooms-empty", "Gerade keine offenen Räume."));
+  if (!liste.length) return box.append(el("div", "rooms-empty", t("schale.keineRaeume", {}, "Gerade keine offenen Räume.")));
   for (const r of liste) {
     const row = el("div", "roomrow");
     row.append(el("span", "roomrow-code", r.code));
@@ -172,7 +179,7 @@ function zeichneRaum() {
   if (r.phase === "lobby") zeige("lobby");
   else if (r.phase === "playing") zeige("game");
   $("roomCode").textContent = r.code;
-  $("roomVis").textContent = r.isPublic ? "öffentlich" : "privat";
+  $("roomVis").textContent = r.isPublic ? t("schale.oeffentlich", {}, "öffentlich") : t("schale.privat", {}, "privat");
   $("lobbyCount").textContent = `${r.players.length}/${r.maxPlayers}`;
 
   const liste = $("playerList");
@@ -181,8 +188,12 @@ function zeichneRaum() {
     const s = el("div", "seat" + (p.ready ? " ready" : "") + (p.connected ? "" : " off"));
     s.append(el("div", "av", (p.name[0] ?? "?").toUpperCase()));
     s.append(el("div", "nm", p.name));
-    s.append(el("div", "st", p.ready ? "bereit" : p.connected ? "wartet" : "weg"));
-    if (p.host) s.append(el("div", "host", "Host"));
+    s.append(el("div", "st", p.ready
+        ? t("schale.bereit", {}, "bereit")
+        : p.connected
+        ? t("schale.wartet", {}, "wartet")
+        : t("schale.fort", {}, "weg")));
+    if (p.host) s.append(el("div", "host", t("schale.host", {}, "Host")));
     liste.append(s);
   }
 
@@ -197,8 +208,8 @@ function zeichneRaum() {
   const alleBereit = r.players.filter((p) => p.connected && p.id !== r.hostId).every((p) => p.ready);
   $("startBtn").disabled = da < r.minPlayers || !alleBereit;
   $("startHint").textContent = da < r.minPlayers
-    ? `Mindestens ${r.minPlayers} Leute – ihr seid ${da}.`
-    : alleBereit ? "" : "Noch nicht alle sind bereit.";
+    ? t("schale.mindestens", { min: r.minPlayers, da }, `Mindestens ${r.minPlayers} Leute – ihr seid ${da}.`)
+    : alleBereit ? "" : t("schale.nichtBereit", {}, "Noch nicht alle sind bereit.");
   const ich = r.players.find((p) => p.id === S.me);
   $("readyBtn").classList.toggle("on", !!ich?.ready);
 }
@@ -211,7 +222,9 @@ function zeichneSpiel() {
   if (!m) return;
   zeige("game");
   $("stapelZahl").textContent = m.stapel;
-  $("ansageTag").textContent = m.rang ? "Dran: " + m.rang : "freie Ansage";
+  $("ansageTag").textContent = m.rang
+    ? t("lg.dran", { rang: m.rang }, "Dran: " + m.rang)
+    : t("lg.freieAnsage", {}, "freie Ansage");
 
   // Mitspieler
   const g = $("gegner");
@@ -227,10 +240,13 @@ function zeichneSpiel() {
   const mi = $("mitte");
   mi.innerHTML = "";
   if (m.letzte) {
-    mi.append(el("p", "mitte-txt",
-      `${m.letzte.von} sagt: ${m.letzte.anzahl}× ${m.letzte.rang}`));
+    mi.append(el("p", "mitte-txt", t(
+      "lg.sagt",
+      { name: m.letzte.von, n: m.letzte.anzahl, rang: m.letzte.rang },
+      `${m.letzte.von} sagt: ${m.letzte.anzahl}× ${m.letzte.rang}`,
+    )));
   } else {
-    mi.append(el("p", "mitte-txt", "Neue Ansage – der Stapel ist frei."));
+    mi.append(el("p", "mitte-txt", t("lg.neueAnsage", {}, "Neue Ansage – der Stapel ist frei.")));
   }
 
   // Aufdeckung
@@ -239,14 +255,18 @@ function zeichneSpiel() {
     auf.hidden = false;
     auf.innerHTML = "";
     const a = m.aufdeckung;
-    auf.append(el("p", "auf-kopf", a.gelogen ? "Gelogen!" : "Die Wahrheit."));
+    auf.append(el("p", "auf-kopf",
+      a.gelogen ? t("lg.gelogen", {}, "Gelogen!") : t("lg.wahrheit", {}, "Die Wahrheit.")));
     const row = el("div", "auf-karten");
     for (const k of a.karten) {
       row.append(el("span", "karte " + (k.f === "♥" || k.f === "♦" ? "rot" : ""), KARTE(k)));
     }
     auf.append(row);
-    auf.append(el("p", "auf-txt",
-      `Angesagt war ${a.rang}. ${a.nehmer} nimmt ${a.anzahl} Karten.`));
+    auf.append(el("p", "auf-txt", t(
+      "lg.angesagtWar",
+      { rang: a.rang, name: a.nehmer, n: a.anzahl },
+      `Angesagt war ${a.rang}. ${a.nehmer} nimmt ${a.anzahl} Karten.`,
+    )));
   } else {
     auf.hidden = true;
   }
@@ -271,7 +291,7 @@ function zeichneSpiel() {
   const akt = $("aktionen");
   akt.innerHTML = "";
   if (m.schritt === "aufdecken") {
-    $("rundenHint").textContent = "Aufgedeckt – gleich geht es weiter.";
+    $("rundenHint").textContent = t("lg.aufgedeckt", {}, "Aufgedeckt – gleich geht es weiter.");
     S.gewaehlt.clear();
     return;
   }
@@ -285,7 +305,7 @@ function zeichneSpiel() {
       }
       akt.append(wahl);
     }
-    const legen = el("button", "btn primary big", "Legen");
+    const legen = el("button", "btn primary big", t("lg.legen", {}, "Legen"));
     legen.disabled = !S.gewaehlt.size || (m.rang === null && !S.ansage);
     legen.onclick = () => {
       schicke({ t: "legen", karten: [...S.gewaehlt], rang: m.rang ?? S.ansage });
@@ -293,15 +313,15 @@ function zeichneSpiel() {
     };
     akt.append(legen);
     $("rundenHint").textContent = m.rang
-      ? `Du bist dran: ${m.rang} ansagen – ehrlich oder nicht.`
-      : "Du bist dran: Rang wählen und legen.";
+      ? t("lg.duDranRang", { rang: m.rang }, `Du bist dran: ${m.rang} ansagen – ehrlich oder nicht.`)
+      : t("lg.duDranFrei", {}, "Du bist dran: Rang wählen und legen.");
   } else {
     $("rundenHint").textContent = m.letzte
-      ? "Glaubst du das?"
-      : "Warte, bis du dran bist.";
+      ? t("lg.glaubstDu", {}, "Glaubst du das?")
+      : t("lg.warteDran", {}, "Warte, bis du dran bist.");
   }
   if (m.letzte && m.letzte.vonId !== S.me && m.schritt === "legen") {
-    const l = el("button", "btn big luege", "Lüge!");
+    const l = el("button", "btn big luege", t("lg.luege", {}, "Lüge!"));
     l.onclick = () => schicke({ t: "luege" });
     akt.append(l);
   }
@@ -310,14 +330,17 @@ function zeichneSpiel() {
 function zeichneFinal(m) {
   zeige("final");
   $("finalSub").textContent = m.verlierer.length
-    ? `${m.verlierer.join(", ")} bleibt auf den Karten sitzen.`
+    ? t("lg.bleibtSitzen", { name: m.verlierer.join(", ") },
+      `${m.verlierer.join(", ")} bleibt auf den Karten sitzen.`)
     : "";
   const ol = $("podium");
   ol.innerHTML = "";
   for (const z of m.tabelle) {
     const li = el("li");
     li.append(el("span", "pd-name", z.name));
-    li.append(el("span", "pd-pt", z.karten ? z.karten + " Karten" : "durch"));
+    li.append(el("span", "pd-pt", z.karten
+      ? t("lg.nKarten", { n: z.karten }, z.karten + " Karten")
+      : t("lg.durch", {}, "durch")));
     ol.append(li);
   }
   $("againBtn").hidden = S.room?.hostId !== S.me;
@@ -344,7 +367,7 @@ $("joinBtn").onclick = () => {
 $("copyBtn").onclick = async () => {
   try {
     await navigator.clipboard.writeText(location.origin + location.pathname + "#" + S.code);
-    toast("Link kopiert");
+    toast(t("schale.kopiert", {}, "Link kopiert"));
   } catch { toast(location.href); }
 };
 $("readyBtn").onclick = () => {
