@@ -385,9 +385,38 @@ function verlassen() {
   zeige("home");
   schicke({ t: "browse" });
 }
-$("leaveBtn").onclick = verlassen;
+// Zwei Stufen, aber nur wo es weh tut: im Warteraum kostet ein Fehlgriff
+// nichts, in der laufenden Runde das Blatt. Seit dem 08.09.2026 ist dieser
+// Knopf der einzige Weg, den Platz wirklich aufzugeben – alles andere
+// (weggewischt, gesperrt, Funkloch) hält der Server minutenlang frei. Der
+// Knopf schreibt sich dafür kurz um, statt einen Dialog aufzumachen:
+// `confirm()` blockiert auf dem Handy die ganze Seite, und die Verbindung
+// läuft derweil weiter.
+const BEDENK_MS = 4000;
+
+function knopfRaus(b) {
+  if (!b) return;
+  let scharf = null;
+  const zurueck = () => {
+    clearTimeout(scharf);
+    scharf = null;
+    if (b.dataset.wortlaut != null) b.textContent = b.dataset.wortlaut;
+    b.classList.remove("fragt");
+  };
+  b.addEventListener("click", () => {
+    const raum = S.room;
+    if (!raum || raum.phase === "lobby") return verlassen();
+    if (scharf) { zurueck(); return verlassen(); }
+    b.dataset.wortlaut = b.textContent;
+    b.textContent = t("schale.wirklichRaus", {}, "Wirklich raus?");
+    b.classList.add("fragt");
+    scharf = setTimeout(zurueck, BEDENK_MS);
+  });
+}
+
+knopfRaus($("leaveBtn"));
 // Derselbe Weg hinaus von überall: Lobby, Spielbildschirm, Endstand.
-for (const b of document.querySelectorAll("[data-raus]")) b.onclick = verlassen;
+for (const b of document.querySelectorAll("[data-raus]")) knopfRaus(b);
 $("helpBtn").onclick = () => { $("help").hidden = false; };
 $("helpClose").onclick = () => { $("help").hidden = true; };
 
@@ -406,4 +435,9 @@ verbinde(() => {
     schicke({ t: "browse" });
   }
 });
-setInterval(() => schicke({ t: "ping", c: Date.now() }), 25000);
+// Lebenszeichen alle 20 s. Der Server räumt Verbindungen ab, die 180 s lang
+// schweigen (die Geisterwache in `server.js`) – das sind neun Pings Luft.
+// Vorher: 25 s Takt gegen 65 s Frist, also zwei; wer eine Weile nur zusah und
+// nichts drückte, flog dadurch mitten im Spiel aus dem Raum. Gleicher Takt wie
+// in `gemeinsam/schale.js`.
+setInterval(() => schicke({ t: "ping", c: Date.now() }), 20_000);
